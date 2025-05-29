@@ -309,8 +309,16 @@
                         </div>
 
                         <div class="filter-section">
-                            <label>Duration (days)</label>
-                            <input type="number" id="filterMaxDuration" placeholder="Max days" onchange="applyFilters()">
+                            <label>Duration</label>
+                            <div style="display: flex; gap: 5px;">
+                                <input type="number" id="filterMaxDuration" placeholder="Max" onchange="applyFilters()" style="width: 80px;">
+                                <select id="filterDurationUnit" onchange="applyFilters()" style="width: 70px;">
+                                    <option value="minutes">Min</option>
+                                    <option value="days" selected>Days</option>
+                                    <option value="months">Mon</option>
+                                    <option value="years">Yrs</option>
+                                </select>
+                            </div>
                         </div>
 
                         <button onclick="clearFilters()">Clear Filters</button>
@@ -348,8 +356,16 @@
                 </div>
 
                 <div class="form-group">
-                    <label>Repayment Period (days)</label>
-                    <input type="number" id="duration" placeholder="30" min="1">
+                    <label>Repayment Period</label>
+                    <div style="display: flex; gap: 10px;">
+                        <input type="number" id="duration" placeholder="30" min="1" style="width: 120px;">
+                        <select id="durationUnit" style="width: 100px;">
+                            <option value="minutes">Minutes</option>
+                            <option value="days" selected>Days</option>
+                            <option value="months">Months</option>
+                            <option value="years">Years</option>
+                        </select>
+                    </div>
                 </div>
 
                 <div class="form-group">
@@ -426,6 +442,28 @@
         let contract;
         let userAddress;
         let allLoans = [];
+
+        function convertDurationToSeconds(value, unit) {
+            switch(unit) {
+                case 'minutes': return value * 60;
+                case 'days': return value * 86400;
+                case 'months': return value * 30 * 86400;
+                case 'years': return value * 365 * 86400;
+                default: return value * 86400;
+            }
+        }
+
+        function formatDuration(seconds) {
+            const years = Math.floor(seconds / (365 * 86400));
+            const months = Math.floor((seconds % (365 * 86400)) / (30 * 86400));
+            const days = Math.floor((seconds % (30 * 86400)) / 86400);
+            const minutes = Math.floor(seconds / 60);
+            
+            if (years > 0) return `${years} year${years > 1 ? 's' : ''}${months > 0 ? ` ${months} month${months > 1 ? 's' : ''}` : ''}`;
+            if (months > 0) return `${months} month${months > 1 ? 's' : ''}${days > 0 ? ` ${days} day${days > 1 ? 's' : ''}` : ''}`;
+            if (days > 0) return `${days} day${days > 1 ? 's' : ''}`;
+            return `${minutes} minute${minutes > 1 ? 's' : ''}`;
+        }
 
         function showStatus(message, type = 'info') {
             const statusDiv = document.getElementById('statusMessages');
@@ -542,12 +580,14 @@
             const maxAmount = parseFloat(document.getElementById('filterMaxAmount').value) || Infinity;
             const minInterest = parseFloat(document.getElementById('filterMinInterest').value) || 0;
             const maxInterest = parseFloat(document.getElementById('filterMaxInterest').value) || Infinity;
-            const maxDuration = parseInt(document.getElementById('filterMaxDuration').value) || Infinity;
+            const maxDurationValue = parseInt(document.getElementById('filterMaxDuration').value);
+            const maxDurationUnit = document.getElementById('filterDurationUnit').value;
+            const maxDuration = maxDurationValue ? convertDurationToSeconds(maxDurationValue, maxDurationUnit) : Infinity;
             
             const filteredLoans = allLoans.filter(loan => {
                 const amount = parseFloat(ethers.utils.formatEther(loan.amount));
                 const interest = loan.interestRate / 100;
-                const duration = loan.duration / 86400;
+                const duration = loan.duration;
                 
                 if (status !== 'all') {
                     if (status === 'pending' && loan.isFunded) return false;
@@ -583,7 +623,8 @@
             grid.innerHTML = loans.map(loan => {
                 const status = loan.isRepaid ? 'repaid' : (loan.isFunded ? 'funded' : 'pending');
                 const statusText = loan.isRepaid ? 'Repaid' : (loan.isFunded ? 'Funded' : 'Available');
-                const canFund = !loan.isFunded && loan.borrower.toLowerCase() !== userAddress.toLowerCase();
+                const canFund = !loan.isFunded;
+                const isOwnLoan = loan.borrower.toLowerCase() === userAddress.toLowerCase();
                 
                 return `
                     <div class="loan-card" ${loan.borrower.toLowerCase() === userAddress.toLowerCase() ? 'style="border: 3px solid #667eea; background: #f0f5ff;"' : ''}>
@@ -595,15 +636,15 @@
                         <div class="loan-details">
                             <strong>Amount:</strong> ${ethers.utils.formatEther(loan.amount)} ETH<br>
                             <strong>Interest:</strong> ${loan.interestRate / 100}%<br>
-                            <strong>Duration:</strong> ${loan.duration / 86400} days<br>
+                            <strong>Duration:</strong> ${formatDuration(loan.duration)}<br>
                             <strong>Total Repay:</strong> ${ethers.utils.formatEther(loan.repaymentAmount)} ETH<br>
                             <strong>Borrower:</strong> ${loan.borrower.substring(0, 6)}...${loan.borrower.substring(38)}
                             ${loan.borrower.toLowerCase() === userAddress.toLowerCase() ? ' (You)' : ''}
                         </div>
                         
                         ${canFund ? `
-                            <button onclick="fundLoan(${loan.id}, '${loan.amount}')" style="width: 100%; margin-top: 15px; background-color: #28a745; font-size: 16px;">
-                                💰 Fund This Loan (${ethers.utils.formatEther(loan.amount)} ETH)
+                            <button onclick="fundLoan(${loan.id}, '${loan.amount}')" style="width: 100%; margin-top: 15px; background-color: ${isOwnLoan ? '#ffc107' : '#28a745'}; color: ${isOwnLoan ? '#000' : '#fff'}; font-size: 16px;">
+                                ${isOwnLoan ? '🧪 Fund Own Loan (TESTING)' : '💰 Fund This Loan'} (${ethers.utils.formatEther(loan.amount)} ETH)
                             </button>
                         ` : ''}
                         
@@ -652,6 +693,7 @@
             document.getElementById('filterMinInterest').value = '';
             document.getElementById('filterMaxInterest').value = '';
             document.getElementById('filterMaxDuration').value = '';
+            document.getElementById('filterDurationUnit').value = 'days';
             document.getElementById('searchLoanId').value = '';
             applyFilters();
         }
@@ -690,7 +732,8 @@
                 
                 const amountWei = ethers.utils.parseEther(amount);
                 const interestRateBps = Math.floor(parseFloat(interestRate) * 100);
-                const durationSeconds = parseInt(duration) * 86400;
+                const durationUnit = document.getElementById('durationUnit').value;
+                const durationSeconds = convertDurationToSeconds(parseInt(duration), durationUnit);
                 
                 const tx = await contract.createLoanRequest(amountWei, interestRateBps, durationSeconds);
                 showStatus(`Transaction submitted: ${tx.hash.substring(0, 10)}...`, 'info');
@@ -785,7 +828,7 @@
                                     <strong>Borrowed:</strong> ${ethers.utils.formatEther(loan.amount)} ETH<br>
                                     <strong>Total Due:</strong> ${ethers.utils.formatEther(loan.repaymentAmount)} ETH<br>
                                     <strong>Interest:</strong> ${loan.interestRate / 100}%<br>
-                                    <strong>Duration:</strong> ${loan.duration / 86400} days
+                                    <strong>Duration:</strong> ${formatDuration(loan.duration)}
                                 </div>
                                 ${loan.isFunded && !loan.isRepaid ? 
                                     `<button onclick="repayLoan(${loan.id}, '${loan.repaymentAmount}')">Repay Loan</button>` : ''}
