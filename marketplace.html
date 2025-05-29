@@ -542,6 +542,10 @@
         async function loadMarketplace() {
             try {
                 showStatus('Loading marketplace...', 'info');
+                
+                // Clear search box when loading all loans
+                document.getElementById('searchLoanId').value = '';
+                
                 const loanCount = await contract.loanRequestCounter();
                 allLoans = [];
                 
@@ -671,6 +675,7 @@
             }
             
             try {
+                showStatus(`Searching for Loan #${loanId}...`, 'info');
                 const loan = await contract.getLoanRequest(loanId);
                 if (loan.id == 0) {
                     showStatus(`Loan #${loanId} not found`, 'error');
@@ -678,7 +683,10 @@
                 }
                 
                 const isOverdue = await contract.isLoanOverdue(loanId);
-                displayLoans([{ ...loan, isOverdue }]);
+                
+                // Update allLoans to contain only the searched loan for consistency with filters
+                allLoans = [{ ...loan, isOverdue }];
+                displayLoans(allLoans);
                 showStatus(`Showing Loan #${loanId}`, 'success');
                 
             } catch (error) {
