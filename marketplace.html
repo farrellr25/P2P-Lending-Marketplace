@@ -627,7 +627,7 @@
             grid.innerHTML = loans.map(loan => {
                 const status = loan.isRepaid ? 'repaid' : (loan.isFunded ? 'funded' : 'pending');
                 const statusText = loan.isRepaid ? 'Repaid' : (loan.isFunded ? 'Funded' : 'Available');
-                const canFund = !loan.isFunded;
+                const canFund = !loan.isFunded && loan.borrower.toLowerCase() !== userAddress.toLowerCase();
                 const isOwnLoan = loan.borrower.toLowerCase() === userAddress.toLowerCase();
                 
                 return `
@@ -647,9 +647,13 @@
                         </div>
                         
                         ${canFund ? `
-                            <button onclick="fundLoan(${loan.id}, '${loan.amount}')" style="width: 100%; margin-top: 15px; background-color: ${isOwnLoan ? '#ffc107' : '#28a745'}; color: ${isOwnLoan ? '#000' : '#fff'}; font-size: 16px;">
-                                ${isOwnLoan ? '🧪 Fund Own Loan (TESTING)' : '💰 Fund This Loan'} (${ethers.utils.formatEther(loan.amount)} ETH)
+                            <button onclick="fundLoan(${loan.id}, '${loan.amount}')" style="width: 100%; margin-top: 15px; background-color: #28a745; font-size: 16px;">
+                                💰 Fund This Loan (${ethers.utils.formatEther(loan.amount)} ETH)
                             </button>
+                        ` : isOwnLoan && !loan.isFunded ? `
+                            <div style="text-align: center; color: #6c757d; margin-top: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px; font-style: italic;">
+                                ℹ️ You cannot fund your own loan
+                            </div>
                         ` : ''}
                         
                         ${loan.borrower.toLowerCase() === userAddress.toLowerCase() && !loan.isFunded ? 
