@@ -1,0 +1,33 @@
+# Only include essential website files
+# Exclude all development artifacts
+
+# Development files
+../frontend/
+../node_modules/
+../cache/
+../artifacts/
+../contracts/
+../scripts/
+../test/
+../ignition/
+
+# Config files
+../hardhat.config.js
+../package.json
+../package-lock.json
+../.env*
+
+# Unnecessary HTML files
+../index.html
+../frontend/*.html
+
+# Build artifacts
+*.json
+*.js
+!index.html
+!marketplace.html
+
+# IDE and OS files
+.DS_Store
+.vscode/
+*.swp
