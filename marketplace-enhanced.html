@@ -471,7 +471,7 @@
     <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
     <script>
         // IMPORTANT: Update this address after deploying the enhanced contract!
-        const CONTRACT_ADDRESS = "0x003918b8A74CF58ECb7a477E572F11F449eb6399";
+        const CONTRACT_ADDRESS = "0x8bA88B0563974a9823cdd645b795743C718D5d34";
         
         // Enhanced contract ABI with partial repayment functions
         const CONTRACT_ABI = [
@@ -1003,42 +1003,89 @@
             }
             
             try {
+                showStatus(`🔍 Checking loan details for Loan #${loanId}...`, 'info');
+                
+                // Get loan details first
+                const loan = await contract.getLoanRequest(loanId);
+                const isOverdue = await contract.isLoanOverdue(loanId);
+                
+                console.log('Loan Details:', {
+                    id: loan.id.toString(),
+                    borrower: loan.borrower,
+                    amount: ethers.utils.formatEther(loan.amount),
+                    repaymentAmount: ethers.utils.formatEther(loan.repaymentAmount),
+                    amountRepaid: ethers.utils.formatEther(loan.amountRepaid),
+                    isFunded: loan.isFunded,
+                    isRepaid: loan.isRepaid,
+                    isOverdue: isOverdue,
+                    fundedAt: loan.fundedAt.toString(),
+                    duration: loan.duration.toString()
+                });
+                
                 // Get current balance in real-time to account for any late fees
                 let currentBalance;
                 try {
                     const balanceInfo = await contract.getCurrentBalance(loanId);
                     currentBalance = balanceInfo.remainingBalance;
-                    showStatus(`Current remaining balance: ${ethers.utils.formatEther(currentBalance)} ETH`, 'info');
+                    console.log('Balance Info:', {
+                        totalDue: ethers.utils.formatEther(balanceInfo.totalDue),
+                        amountPaid: ethers.utils.formatEther(balanceInfo.amountPaid),
+                        remainingBalance: ethers.utils.formatEther(balanceInfo.remainingBalance),
+                        hasLateFee: balanceInfo.hasLateFee
+                    });
+                    showStatus(`✅ Current remaining balance: ${ethers.utils.formatEther(currentBalance)} ETH`, 'info');
                 } catch (e) {
                     // Fallback to the passed maxAmount if getCurrentBalance fails
                     currentBalance = maxAmount;
                     console.warn('Could not get current balance, using fallback:', e);
+                    showStatus(`⚠️ Using fallback balance: ${ethers.utils.formatEther(currentBalance)} ETH`, 'info');
                 }
                 
                 const amountWei = ethers.utils.parseEther(repaymentAmount);
+                console.log('Payment Details:', {
+                    repaymentAmount: repaymentAmount,
+                    amountWei: amountWei.toString(),
+                    currentBalance: currentBalance.toString(),
+                    userAddress: userAddress,
+                    borrower: loan.borrower
+                });
+                
                 if (amountWei.gt(currentBalance)) {
-                    showStatus(`Repayment amount exceeds current remaining balance of ${ethers.utils.formatEther(currentBalance)} ETH`, 'error');
+                    showStatus(`❌ Repayment amount exceeds current remaining balance of ${ethers.utils.formatEther(currentBalance)} ETH`, 'error');
                     return;
                 }
                 
-                if (confirm(`Make partial payment of ${repaymentAmount} ETH for Loan #${loanId}?\nCurrent remaining balance: ${ethers.utils.formatEther(currentBalance)} ETH`)) {
-                    showStatus(`Processing partial repayment for loan #${loanId}...`, 'info');
+                // Check if user is actually the borrower
+                if (loan.borrower.toLowerCase() !== userAddress.toLowerCase()) {
+                    showStatus(`❌ Only the borrower can repay this loan. Borrower: ${loan.borrower}, You: ${userAddress}`, 'error');
+                    return;
+                }
+                
+                if (confirm(`Make partial payment of ${repaymentAmount} ETH for Loan #${loanId}?\n\nLoan Details:\n- Current remaining balance: ${ethers.utils.formatEther(currentBalance)} ETH\n- Is overdue: ${isOverdue}\n- Your payment: ${repaymentAmount} ETH`)) {
+                    showStatus(`💰 Processing partial repayment for loan #${loanId}...`, 'info');
                     
                     const tx = await contract.repayLoan(loanId, amountWei, { 
                         value: amountWei,
-                        gasLimit: 350000 // Increase gas limit for overdue loans
+                        gasLimit: 500000 // Increase gas limit further for debugging
                     });
-                    showStatus(`Transaction submitted: ${formatTxWithLink(tx.hash)}`, 'info');
+                    showStatus(`📝 Transaction submitted: ${formatTxWithLink(tx.hash)}`, 'info');
                     
                     await tx.wait();
-                    showStatus(`Successfully made partial payment of ${repaymentAmount} ETH!`, 'success');
+                    showStatus(`✅ Successfully made partial payment of ${repaymentAmount} ETH!`, 'success');
                     
                     loadMarketplace();
                     loadMyLoans();
                 }
             } catch (error) {
-                console.error(error);
-                showStatus(`Error: ${error.reason || error.message}`, 'error');
+                console.error('Full error details:', error);
+                let errorMessage = error.reason || error.message || 'Unknown error';
+                
+                // Try to extract more specific error information
+                if (error.data && error.data.message) {
+                    errorMessage = error.data.message;
+                }
+                
+                showStatus(`❌ Error: ${errorMessage}`, 'error');
             }
         }
 
