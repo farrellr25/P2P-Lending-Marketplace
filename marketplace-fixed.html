@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P Lending - Fixed Repayment</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f0f2f5;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 10px;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .container {
+            background: white;
+            padding: 25px;
+            margin: 20px 0;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        button {
+            background-color: #667eea;
+            color: white;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #5a67d8;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        input {
+            padding: 10px;
+            margin: 5px;
+            border: 2px solid #e1e4e8;
+            border-radius: 5px;
+            width: 200px;
+        }
+        .loan-card {
+            background: white;
+            border: 2px solid #e1e4e8;
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 8px;
+            position: relative;
+        }
+        .loan-id {
+            position: absolute;
+            top: 10px;
+            right: 15px;
+            background: #667eea;
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-weight: bold;
+        }
+        .status {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: bold;
+            margin: 5px 0;
+        }
+        .status-pending { background: #fff3cd; color: #856404; }
+        .status-funded { background: #d1ecf1; color: #0c5460; }
+        .status-repaid { background: #d4edda; color: #155724; }
+        .status-overdue { background: #f8d7da; color: #721c24; }
+        .repayment-section {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+        .alert {
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .alert-success { background: #d4edda; color: #155724; }
+        .alert-error { background: #f8d7da; color: #721c24; }
+        .alert-info { background: #d1ecf1; color: #0c5460; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🏦 P2P Lending - Fixed Repayment</h1>
+        <p>Testing the Fixed Repayment Contract</p>
+    </div>
+    
+    <!-- Connection Status -->
+    <div class="container">
+        <h2>👛 Wallet Connection</h2>
+        <button onclick="connectWallet()">Connect MetaMask</button>
+        <div id="connectionStatus"></div>
+    </div>
+
+    <!-- Main Interface -->
+    <div id="mainInterface" style="display: none;">
+        <!-- Quick Actions -->
+        <div class="container">
+            <h2>🚀 Quick Actions</h2>
+            <button onclick="createTestLoan()">Create Test Loan (0.01 ETH, 10%, 5 min)</button>
+            <button onclick="loadMarketplace()">🔄 Refresh Loans</button>
+            <div id="testLoanResult"></div>
+        </div>
+
+        <!-- Marketplace -->
+        <div class="container">
+            <h2>📋 All Loans</h2>
+            <div id="loansList"></div>
+        </div>
+    </div>
+
+    <!-- Status Messages -->
+    <div class="container">
+        <h2>📝 Status Log</h2>
+        <div id="statusMessages"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+    <script>
+        // FIXED CONTRACT ADDRESS - deployed locally  
+        const CONTRACT_ADDRESS = "0x0199577E168CaFdF27BBCa86F59CFB2B1D0A467d";
+        
+        // COMPLETE ABI for P2PLendingFixed contract
+        const CONTRACT_ABI = [
+            "function createLoanRequest(uint256 _amount, uint256 _interestRate, uint256 _duration) returns (uint256)",
+            "function fundLoan(uint256 _requestId) payable",
+            "function repayLoan(uint256 _requestId, uint256 _repaymentAmount) payable",
+            "function getLoanRequest(uint256 _requestId) view returns (tuple(uint256 id, address borrower, uint256 amount, uint256 interestRate, uint256 duration, uint256 createdAt, bool isFunded, bool isRepaid, address lender, uint256 fundedAt, uint256 repaymentAmount, uint256 amountRepaid, bool isOverdue, bool lateFeeApplied))",
+            "function getCurrentBalance(uint256 _requestId) view returns (uint256 totalDue, uint256 amountPaid, uint256 remainingBalance, bool hasLateFee)",
+            "function getBorrowerLoans(address _borrower) view returns (uint256[])",
+            "function getLenderLoans(address _lender) view returns (uint256[])",
+            "function loanRequestCounter() view returns (uint256)",
+            "function isLoanOverdue(uint256 _requestId) view returns (bool)",
+            "event LoanRequestCreated(uint256 indexed requestId, address indexed borrower, uint256 amount, uint256 interestRate, uint256 duration)",
+            "event LoanFunded(uint256 indexed requestId, address indexed borrower, address indexed lender, uint256 amount)",
+            "event LoanRepaid(uint256 indexed requestId, address indexed borrower, address indexed lender, uint256 amount)",
+            "event PartialRepayment(uint256 indexed requestId, address indexed borrower, address indexed lender, uint256 amount, uint256 remainingBalance)",
+            "event LateFeeApplied(uint256 indexed requestId, uint256 originalAmount, uint256 newAmount, uint256 lateFee)"
+        ];
+
+        let provider;
+        let signer;
+        let contract;
+        let userAddress;
+
+        function showStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('statusMessages');
+            const messageDiv = document.createElement('div');
+            const time = new Date().toLocaleTimeString();
+            messageDiv.className = `alert alert-${type}`;
+            messageDiv.innerHTML = `<strong>${time}</strong> - ${message}`;
+            statusDiv.insertBefore(messageDiv, statusDiv.firstChild);
+            
+            while (statusDiv.children.length > 8) {
+                statusDiv.removeChild(statusDiv.lastChild);
+            }
+        }
+
+        async function connectWallet() {
+            try {
+                if (typeof window.ethereum === 'undefined') {
+                    showStatus('Please install MetaMask!', 'error');
+                    return;
+                }
+
+                showStatus('Connecting to MetaMask...', 'info');
+                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                
+                provider = new ethers.providers.Web3Provider(window.ethereum);
+                signer = provider.getSigner();
+                userAddress = await signer.getAddress();
+                
+                const network = await provider.getNetwork();
+                
+                document.getElementById('connectionStatus').innerHTML = `
+                    <div class="alert alert-success">
+                        <strong>✅ Connected!</strong><br>
+                        Address: ${userAddress}<br>
+                        Network: ${network.name} (Chain ID: ${network.chainId})${network.chainId === 11155111 ? " ✅" : " ⚠️ Switch to Sepolia"}<br>
+                        Contract: ${CONTRACT_ADDRESS}
+                    </div>
+                `;
+                
+                contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
+                document.getElementById('mainInterface').style.display = 'block';
+                
+                showStatus('Successfully connected!', 'success');
+                loadMarketplace();
+                
+                // Listen for events
+                contract.on("LoanRequestCreated", (requestId, borrower, amount, interestRate, duration) => {
+                    showStatus(`New loan created: #${requestId} by ${borrower.substring(0,8)}...`, 'success');
+                    loadMarketplace();
+                });
+
+                contract.on("LoanFunded", (requestId, borrower, lender, amount) => {
+                    showStatus(`Loan #${requestId} funded by ${lender.substring(0,8)}...`, 'success');
+                    loadMarketplace();
+                });
+
+                contract.on("PartialRepayment", (requestId, borrower, lender, amount, remainingBalance) => {
+                    showStatus(`Partial payment: ${ethers.utils.formatEther(amount)} ETH for Loan #${requestId}`, 'success');
+                    loadMarketplace();
+                });
+
+                contract.on("LoanRepaid", (requestId, borrower, lender, amount) => {
+                    showStatus(`Loan #${requestId} fully repaid!`, 'success');
+                    loadMarketplace();
+                });
+
+                contract.on("LateFeeApplied", (requestId, originalAmount, newAmount, lateFee) => {
+                    showStatus(`Late fee applied to Loan #${requestId}: ${ethers.utils.formatEther(lateFee)} ETH`, 'error');
+                    loadMarketplace();
+                });
+                
+            } catch (error) {
+                console.error(error);
+                showStatus(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        async function createTestLoan() {
+            try {
+                showStatus('Creating test loan...', 'info');
+                
+                const amount = ethers.utils.parseEther("0.01"); // 0.01 ETH
+                const interestRate = 1000; // 10% (1000 basis points)
+                const duration = 300; // 5 minutes
+                
+                const tx = await contract.createLoanRequest(amount, interestRate, duration);
+                showStatus(`Transaction submitted: ${tx.hash}`, 'info');
+                
+                await tx.wait();
+                showStatus('Test loan created successfully!', 'success');
+                
+                loadMarketplace();
+                
+            } catch (error) {
+                console.error(error);
+                showStatus(`Error: ${error.reason || error.message}`, 'error');
+            }
+        }
+
+        async function loadMarketplace() {
+            try {
+                showStatus('Loading loans...', 'info');
+                
+                const loanCount = await contract.loanRequestCounter();
+                const loansDiv = document.getElementById('loansList');
+                
+                if (loanCount == 0) {
+                    loansDiv.innerHTML = '<div class="alert alert-info">No loans found. Create a test loan to get started!</div>';
+                    return;
+                }
+                
+                let loansHTML = '';
+                
+                for (let i = 1; i <= loanCount; i++) {
+                    try {
+                        const loan = await contract.getLoanRequest(i);
+                        const isOverdue = await contract.isLoanOverdue(i);
+                        
+                        let balanceInfo = null;
+                        if (loan.isFunded && !loan.isRepaid) {
+                            try {
+                                balanceInfo = await contract.getCurrentBalance(i);
+                            } catch (e) {
+                                console.warn(`Could not get balance for loan ${i}:`, e);
+                            }
+                        }
+                        
+                        const status = loan.isRepaid ? 'repaid' : (isOverdue ? 'overdue' : (loan.isFunded ? 'funded' : 'pending'));
+                        const statusText = loan.isRepaid ? 'Repaid' : (isOverdue ? 'OVERDUE' : (loan.isFunded ? 'Funded' : 'Available'));
+                        
+                        const isMyLoan = loan.borrower.toLowerCase() === userAddress.toLowerCase();
+                        const canFund = !loan.isFunded && !isMyLoan;
+                        const canRepay = isMyLoan && loan.isFunded && !loan.isRepaid;
+                        
+                        let repaymentSection = '';
+                        if (canRepay && balanceInfo) {
+                            repaymentSection = `
+                                <div class="repayment-section">
+                                    <h4>💳 Repayment Details</h4>
+                                    <p><strong>Total Due:</strong> ${ethers.utils.formatEther(balanceInfo.totalDue)} ETH</p>
+                                    <p><strong>Amount Paid:</strong> ${ethers.utils.formatEther(balanceInfo.amountPaid)} ETH</p>
+                                    <p><strong>Remaining:</strong> ${ethers.utils.formatEther(balanceInfo.remainingBalance)} ETH</p>
+                                    ${balanceInfo.hasLateFee ? '<p style="color: red;"><strong>⚠️ Late fee has been applied!</strong></p>' : ''}
+                                    
+                                    <div style="margin-top: 10px;">
+                                        <input type="number" id="repayAmount_${i}" placeholder="Amount to repay" step="0.001" min="0.001" max="${ethers.utils.formatEther(balanceInfo.remainingBalance)}" style="width: 150px;">
+                                        <button onclick="makePartialRepayment(${i})">Make Payment</button>
+                                        <button onclick="repayFullAmount(${i})" style="background-color: #28a745;">Pay Full Amount</button>
+                                    </div>
+                                </div>
+                            `;
+                        }
+                        
+                        loansHTML += `
+                            <div class="loan-card" ${isMyLoan ? 'style="border-color: #667eea; background: #f0f5ff;"' : ''}>
+                                <div class="loan-id">#${i}</div>
+                                <div class="status status-${status}">${statusText}</div>
+                                ${isMyLoan ? '<div class="status" style="background: #667eea; color: white;">YOUR LOAN</div>' : ''}
+                                
+                                <p><strong>Amount:</strong> ${ethers.utils.formatEther(loan.amount)} ETH</p>
+                                <p><strong>Interest:</strong> ${loan.interestRate / 100}%</p>
+                                <p><strong>Duration:</strong> ${loan.duration} seconds</p>
+                                <p><strong>Total Repayment:</strong> ${ethers.utils.formatEther(loan.repaymentAmount)} ETH</p>
+                                <p><strong>Borrower:</strong> ${loan.borrower.substring(0,8)}...${isMyLoan ? ' (You)' : ''}</p>
+                                ${loan.isFunded ? `<p><strong>Lender:</strong> ${loan.lender.substring(0,8)}...</p>` : ''}
+                                ${loan.isFunded ? `<p><strong>Amount Repaid:</strong> ${ethers.utils.formatEther(loan.amountRepaid)} ETH</p>` : ''}
+                                
+                                ${canFund ? `
+                                    <button onclick="fundLoan(${i})" style="background-color: #28a745; width: 100%;">
+                                        💰 Fund This Loan (${ethers.utils.formatEther(loan.amount)} ETH)
+                                    </button>
+                                ` : ''}
+                                
+                                ${repaymentSection}
+                            </div>
+                        `;
+                        
+                    } catch (e) {
+                        console.error(`Error loading loan ${i}:`, e);
+                        loansHTML += `<div class="loan-card"><p>Error loading loan #${i}</p></div>`;
+                    }
+                }
+                
+                loansDiv.innerHTML = loansHTML;
+                showStatus('Loans loaded successfully', 'success');
+                
+            } catch (error) {
+                console.error(error);
+                showStatus(`Error loading loans: ${error.message}`, 'error');
+            }
+        }
+
+        async function fundLoan(loanId) {
+            try {
+                const loan = await contract.getLoanRequest(loanId);
+                
+                if (confirm(`Fund Loan #${loanId} with ${ethers.utils.formatEther(loan.amount)} ETH?`)) {
+                    showStatus(`Funding loan #${loanId}...`, 'info');
+                    
+                    const tx = await contract.fundLoan(loanId, { value: loan.amount });
+                    showStatus(`Transaction submitted: ${tx.hash}`, 'info');
+                    
+                    await tx.wait();
+                    showStatus(`Successfully funded loan #${loanId}!`, 'success');
+                    
+                    loadMarketplace();
+                }
+            } catch (error) {
+                console.error(error);
+                showStatus(`Error funding loan: ${error.reason || error.message}`, 'error');
+            }
+        }
+
+        async function makePartialRepayment(loanId) {
+            try {
+                const repaymentAmount = document.getElementById(`repayAmount_${loanId}`).value;
+                
+                if (!repaymentAmount || parseFloat(repaymentAmount) <= 0) {
+                    showStatus('Please enter a valid repayment amount', 'error');
+                    return;
+                }
+                
+                const amountWei = ethers.utils.parseEther(repaymentAmount);
+                
+                if (confirm(`Make partial payment of ${repaymentAmount} ETH for Loan #${loanId}?`)) {
+                    showStatus(`Processing partial repayment for loan #${loanId}...`, 'info');
+                    
+                    const tx = await contract.repayLoan(loanId, amountWei, { 
+                        value: amountWei,
+                        gasLimit: 500000
+                    });
+                    showStatus(`Transaction submitted: ${tx.hash}`, 'info');
+                    
+                    await tx.wait();
+                    showStatus(`Successfully made partial payment of ${repaymentAmount} ETH!`, 'success');
+                    
+                    loadMarketplace();
+                }
+            } catch (error) {
+                console.error(error);
+                showStatus(`Error making payment: ${error.reason || error.message}`, 'error');
+            }
+        }
+
+        async function repayFullAmount(loanId) {
+            try {
+                // Get current balance to account for any late fees
+                const balanceInfo = await contract.getCurrentBalance(loanId);
+                const fullAmount = balanceInfo.remainingBalance;
+                
+                if (confirm(`Pay full remaining balance of ${ethers.utils.formatEther(fullAmount)} ETH for Loan #${loanId}?`)) {
+                    showStatus(`Processing full repayment for loan #${loanId}...`, 'info');
+                    
+                    const tx = await contract.repayLoan(loanId, fullAmount, { 
+                        value: fullAmount,
+                        gasLimit: 500000
+                    });
+                    showStatus(`Transaction submitted: ${tx.hash}`, 'info');
+                    
+                    await tx.wait();
+                    showStatus(`Successfully repaid loan #${loanId} in full!`, 'success');
+                    
+                    loadMarketplace();
+                }
+            } catch (error) {
+                console.error(error);
+                showStatus(`Error making full payment: ${error.reason || error.message}`, 'error');
+            }
+        }
+
+        // Auto-connect if previously connected
+        window.addEventListener('load', async () => {
+            if (window.ethereum && window.ethereum.selectedAddress) {
+                connectWallet();
+            }
+        });
+    </script>
+</body>
+</html>
