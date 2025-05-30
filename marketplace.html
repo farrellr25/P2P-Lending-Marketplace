@@ -130,6 +130,10 @@
             background: #d4edda;
             color: #155724;
         }
+        .status-overdue {
+            background: #f8d7da;
+            color: #721c24;
+        }
         .loan-details {
             margin: 10px 0;
             line-height: 1.6;
@@ -213,6 +217,12 @@
             padding: 15px;
             margin: 15px 0;
         }
+        .warning-box {
+            background: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 15px;
+            margin: 15px 0;
+        }
         .search-box {
             display: flex;
             gap: 10px;
@@ -231,12 +241,45 @@
             color: #495057;
             margin-bottom: 10px;
         }
+        .repayment-section {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+        .repayment-input {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-top: 10px;
+        }
+        .repayment-input input {
+            flex: 1;
+            margin: 0;
+        }
+        .repayment-input button {
+            padding: 10px 20px;
+            font-size: 14px;
+        }
+        .late-fee-warning {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 10px;
+            border-radius: 5px;
+            margin-top: 10px;
+            font-weight: bold;
+        }
+        .payment-history {
+            margin-top: 10px;
+            font-size: 14px;
+            color: #6c757d;
+        }
     </style>
 </head>
 <body>
     <div class="header">
         <h1>🏦 P2P Lending Marketplace</h1>
-        <p>Decentralized Peer-to-Peer Lending on Sepolia Testnet</p>
+        <p>Decentralized Peer-to-Peer Lending with Partial Repayments & Late Fees</p>
     </div>
     
     <!-- Connection Status -->
@@ -272,12 +315,16 @@
                         <div class="stat-value" id="totalVolume">0 ETH</div>
                         <div class="stat-label">Total Volume</div>
                     </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="overdueLoans">0</div>
+                        <div class="stat-label">Overdue Loans</div>
+                    </div>
                 </div>
 
                 <div class="search-box">
                     <input type="number" id="searchLoanId" placeholder="Search by Loan ID (e.g., 1, 2, 3)">
                     <button onclick="searchLoanById()">🔍 Search</button>
-                    <button onclick="loadMarketplace()">🔄 Refresh All</button>
+                    <button onclick="loadMarketplace()">🔄 Show All Loans</button>
                 </div>
 
                 <div class="marketplace">
@@ -291,6 +338,7 @@
                                 <option value="pending" selected>Available to Fund</option>
                                 <option value="funded">Already Funded</option>
                                 <option value="repaid">Repaid</option>
+                                <option value="overdue">Overdue</option>
                                 <option value="my-loans">My Loans Only</option>
                                 <option value="fundable">Loans I Can Fund</option>
                             </select>
@@ -310,15 +358,12 @@
 
                         <div class="filter-section">
                             <label>Duration</label>
-                            <div style="display: flex; gap: 5px;">
-                                <input type="number" id="filterMaxDuration" placeholder="Max" onchange="applyFilters()" style="width: 80px;">
-                                <select id="filterDurationUnit" onchange="applyFilters()" style="width: 70px;">
-                                    <option value="minutes">Min</option>
-                                    <option value="days" selected>Days</option>
-                                    <option value="months">Mon</option>
-                                    <option value="years">Yrs</option>
-                                </select>
-                            </div>
+                            <input type="number" id="filterMaxDuration" placeholder="Max duration" onchange="applyFilters()">
+                            <select id="filterDurationUnit" onchange="applyFilters()">
+                                <option value="days">Days</option>
+                                <option value="hours">Hours</option>
+                                <option value="minutes">Minutes</option>
+                            </select>
                         </div>
 
                         <button onclick="clearFilters()">Clear Filters</button>
@@ -345,6 +390,11 @@
                     5. Repay the loan + interest before the deadline
                 </div>
 
+                <div class="warning-box">
+                    <strong>⚠️ Late Fee Policy:</strong><br>
+                    If you don't repay on time, a 20% late fee will be added to your remaining balance!
+                </div>
+
                 <div class="form-group">
                     <label>Amount to Borrow (ETH)</label>
                     <input type="number" id="loanAmount" placeholder="0.01" step="0.001" min="0.001">
@@ -357,15 +407,12 @@
 
                 <div class="form-group">
                     <label>Repayment Period</label>
-                    <div style="display: flex; gap: 10px;">
-                        <input type="number" id="duration" placeholder="30" min="1" style="width: 120px;">
-                        <select id="durationUnit" style="width: 100px;">
-                            <option value="minutes">Minutes</option>
-                            <option value="days" selected>Days</option>
-                            <option value="months">Months</option>
-                            <option value="years">Years</option>
-                        </select>
-                    </div>
+                    <input type="number" id="duration" placeholder="30" min="1">
+                    <select id="durationUnit">
+                        <option value="days">Days</option>
+                        <option value="hours">Hours</option>
+                        <option value="minutes">Minutes</option>
+                    </select>
                 </div>
 
                 <div class="form-group">
@@ -423,18 +470,23 @@
 
     <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
     <script>
-        const CONTRACT_ADDRESS = "0x003918b8A74CF58ECb7a477E572F11F449eb6399";
+        // NEWLY DEPLOYED FIXED CONTRACT ADDRESS with overdue repayment fixes
+        const CONTRACT_ADDRESS = "0x3a1032b56043673362c1463fcC353d0E260E31eb";
         
+        // Enhanced contract ABI with partial repayment functions
         const CONTRACT_ABI = [
             "function createLoanRequest(uint256 _amount, uint256 _interestRate, uint256 _duration) returns (uint256)",
             "function fundLoan(uint256 _requestId) payable",
-            "function repayLoan(uint256 _requestId) payable",
-            "function getLoanRequest(uint256 _requestId) view returns (tuple(uint256 id, address borrower, uint256 amount, uint256 interestRate, uint256 duration, uint256 createdAt, bool isFunded, bool isRepaid, address lender, uint256 fundedAt, uint256 repaymentAmount))",
+            "function repayLoan(uint256 _requestId, uint256 _repaymentAmount) payable",
+            "function getLoanRequest(uint256 _requestId) view returns (tuple(uint256 id, address borrower, uint256 amount, uint256 interestRate, uint256 duration, uint256 createdAt, bool isFunded, bool isRepaid, address lender, uint256 fundedAt, uint256 repaymentAmount, uint256 amountRepaid, bool isOverdue))",
+            "function getCurrentBalance(uint256 _requestId) view returns (uint256 totalDue, uint256 amountPaid, uint256 remainingBalance, bool hasLateFee)",
             "function getBorrowerLoans(address _borrower) view returns (uint256[])",
             "function getLenderLoans(address _lender) view returns (uint256[])",
             "function loanRequestCounter() view returns (uint256)",
             "function isLoanOverdue(uint256 _requestId) view returns (bool)",
-            "event LoanRequestCreated(uint256 indexed requestId, address indexed borrower, uint256 amount, uint256 interestRate, uint256 duration)"
+            "event LoanRequestCreated(uint256 indexed requestId, address indexed borrower, uint256 amount, uint256 interestRate, uint256 duration)",
+            "event PartialRepayment(uint256 indexed requestId, address indexed borrower, address indexed lender, uint256 amount, uint256 remainingBalance)",
+            "event LateFeeApplied(uint256 indexed requestId, uint256 originalAmount, uint256 newAmount, uint256 lateFee)"
         ];
 
         // Helper function to get Etherscan URL
@@ -462,33 +514,69 @@
             return `<a href="${getEtherscanUrl('tx', txHash)}" target="_blank" style="color: #667eea; text-decoration: none; border-bottom: 1px dotted #667eea;">${displayTx}</a>`;
         }
 
+        
+        // Helper function to format timestamp
+        function formatTimestamp(timestamp) {
+            const date = new Date(timestamp * 1000);
+            return date.toLocaleString('en-US', { 
+                month: 'short', 
+                day: 'numeric', 
+                year: 'numeric',
+                hour: '2-digit', 
+                minute: '2-digit'
+            });
+        }
+
+        // Helper function to calculate and format due date
+        function getDueDate(fundedAt, duration) {
+            const dueTimestamp = fundedAt + duration;
+            const dueDate = new Date(dueTimestamp * 1000);
+            return {
+                timestamp: dueTimestamp,
+                formatted: formatTimestamp(dueTimestamp),
+                date: dueDate
+            };
+        }
+
+        // Helper function to get time remaining
+        function getTimeRemaining(dueTimestamp) {
+            const now = Math.floor(Date.now() / 1000);
+            const remaining = dueTimestamp - now;
+            
+            if (remaining <= 0) return 'OVERDUE';
+            
+            if (remaining < 3600) return `${Math.floor(remaining / 60)} minutes`;
+            if (remaining < 86400) return `${Math.floor(remaining / 3600)} hours`;
+            return `${Math.floor(remaining / 86400)} days`;
+        }
+
+        // Helper function to check if due within 24 hours
+        function isDueWithin24Hours(dueTimestamp) {
+            const now = Math.floor(Date.now() / 1000);
+            const remaining = dueTimestamp - now;
+            return remaining > 0 && remaining <= 86400; // 24 hours in seconds
+        }
+
+        // Check for loans due soon and show alerts
+        function checkDueSoonLoans() {
+            const dueSoonLoans = allLoans.filter(loan => {
+                if (!loan.isFunded || loan.isRepaid) return false;
+                const dueDate = getDueDate(loan.fundedAt, loan.duration);
+                return isDueWithin24Hours(dueDate.timestamp) && loan.borrower.toLowerCase() === userAddress.toLowerCase();
+            });
+
+            dueSoonLoans.forEach(loan => {
+                const dueDate = getDueDate(loan.fundedAt, loan.duration);
+                const timeRemaining = getTimeRemaining(dueDate.timestamp);
+                showStatus(`⚠️ ALERT: Loan #${loan.id} is due within 24 hours! (${timeRemaining} remaining)`, 'error');
+            });
+        }
+
         let provider;
         let signer;
         let contract;
         let userAddress;
         let allLoans = [];
-
-        function convertDurationToSeconds(value, unit) {
-            switch(unit) {
-                case 'minutes': return value * 60;
-                case 'days': return value * 86400;
-                case 'months': return value * 30 * 86400;
-                case 'years': return value * 365 * 86400;
-                default: return value * 86400;
-            }
-        }
-
-        function formatDuration(seconds) {
-            const years = Math.floor(seconds / (365 * 86400));
-            const months = Math.floor((seconds % (365 * 86400)) / (30 * 86400));
-            const days = Math.floor((seconds % (30 * 86400)) / 86400);
-            const minutes = Math.floor(seconds / 60);
-            
-            if (years > 0) return `${years} year${years > 1 ? 's' : ''}${months > 0 ? ` ${months} month${months > 1 ? 's' : ''}` : ''}`;
-            if (months > 0) return `${months} month${months > 1 ? 's' : ''}${days > 0 ? ` ${days} day${days > 1 ? 's' : ''}` : ''}`;
-            if (days > 0) return `${days} day${days > 1 ? 's' : ''}`;
-            return `${minutes} minute${minutes > 1 ? 's' : ''}`;
-        }
 
         function showStatus(message, type = 'info') {
             const statusDiv = document.getElementById('statusMessages');
@@ -538,13 +626,25 @@
                 showStatus('Successfully connected!', 'success');
                 loadMarketplace();
                 
-                // Listen for loan creation events
+                // Listen for events
                 contract.on("LoanRequestCreated", (requestId, borrower, amount, interestRate, duration) => {
                     if (borrower.toLowerCase() === userAddress.toLowerCase()) {
                         document.getElementById('newLoanId').textContent = `#${requestId}`;
                         document.getElementById('loanCreatedSuccess').style.display = 'block';
                     }
                     loadMarketplace();
+                });
+
+                contract.on("PartialRepayment", (requestId, borrower, lender, amount, remainingBalance) => {
+                    showStatus(`Partial payment received for Loan #${requestId}: ${ethers.utils.formatEther(amount)} ETH`, 'success');
+                    if (borrower.toLowerCase() === userAddress.toLowerCase() || lender.toLowerCase() === userAddress.toLowerCase()) {
+                        loadMyLoans();
+                    }
+                    loadMarketplace();
+                });
+
+                contract.on("LateFeeApplied", (requestId, originalAmount, newAmount, lateFee) => {
+                    showStatus(`Late fee applied to Loan #${requestId}: ${ethers.utils.formatEther(lateFee)} ETH`, 'error');
                 });
                 
             } catch (error) {
@@ -577,31 +677,61 @@
                 
                 let totalVolume = ethers.BigNumber.from(0);
                 let availableCount = 0;
+                let overdueCount = 0;
                 
                 for (let i = 1; i <= loanCount; i++) {
                     const loan = await contract.getLoanRequest(i);
                     const isOverdue = await contract.isLoanOverdue(i);
                     
+                    // Get current balance info for funded loans
+                    let balanceInfo = null;
+                    if (loan.isFunded && !loan.isRepaid) {
+                        try {
+                            balanceInfo = await contract.getCurrentBalance(i);
+                        } catch (e) {
+                            console.error(`Error getting balance for loan ${i}:`, e);
+                        }
+                    }
+                    
                     allLoans.push({
                         ...loan,
-                        isOverdue
+                        isOverdue,
+                        balanceInfo
                     });
                     
                     totalVolume = totalVolume.add(loan.amount);
                     if (!loan.isFunded) availableCount++;
+                    if (isOverdue && !loan.isRepaid) overdueCount++;
                 }
                 
                 document.getElementById('totalLoans').textContent = loanCount.toString();
                 document.getElementById('availableLoans').textContent = availableCount.toString();
                 document.getElementById('totalVolume').textContent = ethers.utils.formatEther(totalVolume) + ' ETH';
+                document.getElementById('overdueLoans').textContent = overdueCount.toString();
                 
                 applyFilters();
                 showStatus('Marketplace loaded', 'success');
+                checkDueSoonLoans();
                 
             } catch (error) {
                 console.error(error);
                 showStatus(`Error loading marketplace: ${error.message}`, 'error');
             }
+        }
+
+        function convertDurationToSeconds(value, unit) {
+            switch(unit) {
+                case 'minutes': return value * 60;
+                case 'hours': return value * 3600;
+                case 'days': return value * 86400;
+                default: return value * 86400;
+            }
+        }
+
+        function formatDuration(seconds) {
+            if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes`;
+            if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours`;
+            return `${Math.floor(seconds / 86400)} days`;
         }
 
         function applyFilters() {
@@ -623,6 +753,7 @@
                     if (status === 'pending' && loan.isFunded) return false;
                     if (status === 'funded' && (!loan.isFunded || loan.isRepaid)) return false;
                     if (status === 'repaid' && !loan.isRepaid) return false;
+                    if (status === 'overdue' && (!loan.isOverdue || loan.isRepaid)) return false;
                     if (status === 'my-loans' && loan.borrower.toLowerCase() !== userAddress.toLowerCase()) return false;
                     if (status === 'fundable' && (loan.isFunded || loan.borrower.toLowerCase() === userAddress.toLowerCase())) return false;
                 }
@@ -651,26 +782,68 @@
             }
             
             grid.innerHTML = loans.map(loan => {
-                const status = loan.isRepaid ? 'repaid' : (loan.isFunded ? 'funded' : 'pending');
-                const statusText = loan.isRepaid ? 'Repaid' : (loan.isFunded ? 'Funded' : 'Available');
+                const status = loan.isRepaid ? 'repaid' : (loan.isOverdue && !loan.isRepaid ? 'overdue' : (loan.isFunded ? 'funded' : 'pending'));
+                const statusText = loan.isRepaid ? 'Repaid' : (loan.isOverdue && !loan.isRepaid ? 'OVERDUE' : (loan.isFunded ? 'Funded' : 'Available'));
                 const canFund = !loan.isFunded && loan.borrower.toLowerCase() !== userAddress.toLowerCase();
                 const isOwnLoan = loan.borrower.toLowerCase() === userAddress.toLowerCase();
                 
+                let repaymentSection = '';
+                if (isOwnLoan && loan.isFunded && !loan.isRepaid) {
+                    const totalDue = loan.balanceInfo ? loan.balanceInfo.totalDue : loan.repaymentAmount;
+                    const amountPaid = loan.balanceInfo ? loan.balanceInfo.amountPaid : loan.amountRepaid || ethers.BigNumber.from(0);
+                    const remaining = loan.balanceInfo ? loan.balanceInfo.remainingBalance : totalDue.sub(amountPaid);
+                    const hasLateFee = loan.balanceInfo ? loan.balanceInfo.hasLateFee : false;
+                    
+                    repaymentSection = `
+                        <div class="repayment-section">
+                            <h4>💳 Repayment Details</h4>
+                            <div class="loan-details">
+                                <strong>Total Due:</strong> ${ethers.utils.formatEther(totalDue)} ETH<br>
+                                <strong>Amount Paid:</strong> ${ethers.utils.formatEther(amountPaid)} ETH<br>
+                                <strong>Remaining:</strong> ${ethers.utils.formatEther(remaining)} ETH
+                            </div>
+                            ${hasLateFee && !loan.isOverdue ? '<div class="late-fee-warning">⚠️ 20% late fee will be applied on next payment!</div>' : ''}
+                            ${loan.isOverdue ? '<div class="late-fee-warning">⚠️ 20% late fee has been applied!</div>' : ''}
+                            <div class="repayment-input">
+                                <input type="number" id="repayAmount_${loan.id}" placeholder="Amount to repay" step="0.001" min="0.001" max="${ethers.utils.formatEther(remaining)}">
+                                <button onclick="makePartialRepayment(${loan.id}, '${remaining}')">Make Payment</button>
+                                <button onclick="repayFullAmount(${loan.id}, '${remaining}')" style="background-color: #28a745;">Pay Full Amount</button>
+                                ${loan.isOverdue ? '<button onclick="loadMarketplace()" style="background-color: #ffc107; color: #000;">🔄 Refresh Balance</button>' : ''}
+                            </div>
+                        </div>
+                    `;
+                }
+                
                 return `
-                    <div class="loan-card" ${loan.borrower.toLowerCase() === userAddress.toLowerCase() ? 'style="border: 3px solid #667eea; background: #f0f5ff;"' : ''}>
+                    <div class="loan-card" ${isOwnLoan ? 'style="border: 3px solid #667eea; background: #f0f5ff;"' : ''}>
                         <div class="loan-id">#${loan.id}</div>
                         <div class="loan-status status-${status}">${statusText}</div>
-                        ${loan.isOverdue && !loan.isRepaid ? '<div class="loan-status" style="background: #f8d7da; color: #721c24;">OVERDUE</div>' : ''}
-                        ${loan.borrower.toLowerCase() === userAddress.toLowerCase() ? '<div class="loan-status" style="background: #667eea; color: white;">YOUR LOAN</div>' : ''}
+                        ${isOwnLoan ? '<div class="loan-status" style="background: #667eea; color: white;">YOUR LOAN</div>' : ''}
                         
                         <div class="loan-details">
                             <strong>Amount:</strong> ${ethers.utils.formatEther(loan.amount)} ETH<br>
                             <strong>Interest:</strong> ${loan.interestRate / 100}%<br>
                             <strong>Duration:</strong> ${formatDuration(loan.duration)}<br>
-                            <strong>Total Repay:</strong> ${ethers.utils.formatEther(loan.repaymentAmount)} ETH<br>
+                            <strong>Original Total:</strong> ${ethers.utils.formatEther(loan.repaymentAmount)} ETH<br>
+                            <strong>Created:</strong> ${formatTimestamp(loan.createdAt)}<br>
+                            ${loan.isFunded ? `<strong>Funded:</strong> ${formatTimestamp(loan.fundedAt)}<br>` : ''}
+                            ${loan.isFunded && !loan.isRepaid ? `
+                                <strong>Due Date:</strong> <span style="color: ${isDueWithin24Hours(getDueDate(loan.fundedAt, loan.duration).timestamp) ? '#dc3545' : 'inherit'}; font-weight: ${isDueWithin24Hours(getDueDate(loan.fundedAt, loan.duration).timestamp) ? 'bold' : 'normal'}">
+                                    ${getDueDate(loan.fundedAt, loan.duration).formatted}
+                                </span><br>
+                                <strong>Time Remaining:</strong> <span style="color: ${isDueWithin24Hours(getDueDate(loan.fundedAt, loan.duration).timestamp) ? '#dc3545' : 'inherit'}; font-weight: ${isDueWithin24Hours(getDueDate(loan.fundedAt, loan.duration).timestamp) ? 'bold' : 'normal'}">
+                                    ${getTimeRemaining(getDueDate(loan.fundedAt, loan.duration).timestamp)}
+                                </span><br>
+                            ` : ''}
                             <strong>Borrower:</strong> ${formatAddressWithLink(loan.borrower)}
-                            ${loan.borrower.toLowerCase() === userAddress.toLowerCase() ? ' (You)' : ''}
+                            ${isOwnLoan ? ' (You)' : ''}
                         </div>
+                        
+                        ${isOwnLoan && loan.isFunded && !loan.isRepaid && isDueWithin24Hours(getDueDate(loan.fundedAt, loan.duration).timestamp) ? `
+                            <div style="background: #f8d7da; color: #721c24; padding: 10px; border-radius: 5px; margin: 10px 0; font-weight: bold; text-align: center;">
+                                ⏰ DUE WITHIN 24 HOURS! Please repay soon to avoid late fees.
+                            </div>
+                        ` : ''}
                         
                         ${canFund ? `
                             <button onclick="fundLoan(${loan.id}, '${loan.amount}')" style="width: 100%; margin-top: 15px; background-color: #28a745; font-size: 16px;">
@@ -682,13 +855,10 @@
                             </div>
                         ` : ''}
                         
-                        ${loan.borrower.toLowerCase() === userAddress.toLowerCase() && !loan.isFunded ? 
+                        ${isOwnLoan && !loan.isFunded ? 
                             '<div style="text-align: center; color: #6c757d; margin-top: 15px; font-style: italic;">⏳ Waiting for a lender to fund your loan</div>' : ''}
                         
-                        ${loan.borrower.toLowerCase() === userAddress.toLowerCase() && loan.isFunded && !loan.isRepaid ? 
-                            `<button onclick="repayLoan(${loan.id}, '${loan.repaymentAmount}')" style="width: 100%; margin-top: 15px;">
-                                💳 Repay Loan (${ethers.utils.formatEther(loan.repaymentAmount)} ETH)
-                            </button>` : ''}
+                        ${repaymentSection}
                         
                         ${loan.lender && loan.lender.toLowerCase() === userAddress.toLowerCase() && loan.isFunded && !loan.isRepaid ? 
                             '<div style="text-align: center; color: #28a745; margin-top: 15px; font-weight: bold;">✅ You funded this loan</div>' : ''}
@@ -714,8 +884,18 @@
                 
                 const isOverdue = await contract.isLoanOverdue(loanId);
                 
+                // Get balance info if needed
+                let balanceInfo = null;
+                if (loan.isFunded && !loan.isRepaid) {
+                    try {
+                        balanceInfo = await contract.getCurrentBalance(loanId);
+                    } catch (e) {
+                        console.error(`Error getting balance:`, e);
+                    }
+                }
+                
                 // Update allLoans to contain only the searched loan for consistency with filters
-                allLoans = [{ ...loan, isOverdue }];
+                allLoans = [{ ...loan, isOverdue, balanceInfo }];
                 displayLoans(allLoans);
                 showStatus(`Showing Loan #${loanId}`, 'success');
                 
@@ -749,7 +929,9 @@
                         <strong>Loan Breakdown:</strong><br>
                         Principal: ${amount} ETH<br>
                         Interest (${interestRate}%): ${interest.toFixed(4)} ETH<br>
-                        <strong>Total Repayment: ${total.toFixed(4)} ETH</strong>
+                        <strong>Total Repayment: ${total.toFixed(4)} ETH</strong><br>
+                        <br>
+                        <em>Note: If you pay late, a 20% fee will be added to any remaining balance!</em>
                     </div>
                 `;
             }
@@ -760,6 +942,7 @@
                 const amount = document.getElementById('loanAmount').value;
                 const interestRate = document.getElementById('interestRate').value;
                 const duration = document.getElementById('duration').value;
+                const durationUnit = document.getElementById('durationUnit').value;
                 
                 if (!amount || !interestRate || !duration) {
                     showStatus('Please fill in all fields', 'error');
@@ -770,7 +953,6 @@
                 
                 const amountWei = ethers.utils.parseEther(amount);
                 const interestRateBps = Math.floor(parseFloat(interestRate) * 100);
-                const durationUnit = document.getElementById('durationUnit').value;
                 const durationSeconds = convertDurationToSeconds(parseInt(duration), durationUnit);
                 
                 const tx = await contract.createLoanRequest(amountWei, interestRateBps, durationSeconds);
@@ -811,16 +993,127 @@
             }
         }
 
-        async function repayLoan(loanId, repaymentAmount) {
+        async function makePartialRepayment(loanId, maxAmount) {
+            const inputId = `repayAmount_${loanId}`;
+            const repaymentAmount = document.getElementById(inputId).value;
+            
+            if (!repaymentAmount || parseFloat(repaymentAmount) <= 0) {
+                showStatus('Please enter a valid repayment amount', 'error');
+                return;
+            }
+            
             try {
-                if (confirm(`Repay Loan #${loanId} with ${ethers.utils.formatEther(repaymentAmount)} ETH?`)) {
-                    showStatus(`Repaying loan #${loanId}...`, 'info');
+                showStatus(`🔍 Checking loan details for Loan #${loanId}...`, 'info');
+                
+                // Get loan details first
+                const loan = await contract.getLoanRequest(loanId);
+                const isOverdue = await contract.isLoanOverdue(loanId);
+                
+                console.log('Loan Details:', {
+                    id: loan.id.toString(),
+                    borrower: loan.borrower,
+                    amount: ethers.utils.formatEther(loan.amount),
+                    repaymentAmount: ethers.utils.formatEther(loan.repaymentAmount),
+                    amountRepaid: ethers.utils.formatEther(loan.amountRepaid),
+                    isFunded: loan.isFunded,
+                    isRepaid: loan.isRepaid,
+                    isOverdue: isOverdue,
+                    fundedAt: loan.fundedAt.toString(),
+                    duration: loan.duration.toString()
+                });
+                
+                // Get current balance in real-time to account for any late fees
+                let currentBalance;
+                try {
+                    const balanceInfo = await contract.getCurrentBalance(loanId);
+                    currentBalance = balanceInfo.remainingBalance;
+                    console.log('Balance Info:', {
+                        totalDue: ethers.utils.formatEther(balanceInfo.totalDue),
+                        amountPaid: ethers.utils.formatEther(balanceInfo.amountPaid),
+                        remainingBalance: ethers.utils.formatEther(balanceInfo.remainingBalance),
+                        hasLateFee: balanceInfo.hasLateFee
+                    });
+                    showStatus(`✅ Current remaining balance: ${ethers.utils.formatEther(currentBalance)} ETH`, 'info');
+                } catch (e) {
+                    // Fallback to the passed maxAmount if getCurrentBalance fails
+                    currentBalance = maxAmount;
+                    console.warn('Could not get current balance, using fallback:', e);
+                    showStatus(`⚠️ Using fallback balance: ${ethers.utils.formatEther(currentBalance)} ETH`, 'info');
+                }
+                
+                const amountWei = ethers.utils.parseEther(repaymentAmount);
+                console.log('Payment Details:', {
+                    repaymentAmount: repaymentAmount,
+                    amountWei: amountWei.toString(),
+                    currentBalance: currentBalance.toString(),
+                    userAddress: userAddress,
+                    borrower: loan.borrower
+                });
+                
+                if (amountWei.gt(currentBalance)) {
+                    showStatus(`❌ Repayment amount exceeds current remaining balance of ${ethers.utils.formatEther(currentBalance)} ETH`, 'error');
+                    return;
+                }
+                
+                // Check if user is actually the borrower
+                if (loan.borrower.toLowerCase() !== userAddress.toLowerCase()) {
+                    showStatus(`❌ Only the borrower can repay this loan. Borrower: ${loan.borrower}, You: ${userAddress}`, 'error');
+                    return;
+                }
+                
+                if (confirm(`Make partial payment of ${repaymentAmount} ETH for Loan #${loanId}?\n\nLoan Details:\n- Current remaining balance: ${ethers.utils.formatEther(currentBalance)} ETH\n- Is overdue: ${isOverdue}\n- Your payment: ${repaymentAmount} ETH`)) {
+                    showStatus(`💰 Processing partial repayment for loan #${loanId}...`, 'info');
                     
-                    const tx = await contract.repayLoan(loanId, { value: repaymentAmount });
+                    const tx = await contract.repayLoan(loanId, amountWei, { 
+                        value: amountWei,
+                        gasLimit: 500000 // Increase gas limit further for debugging
+                    });
+                    showStatus(`📝 Transaction submitted: ${formatTxWithLink(tx.hash)}`, 'info');
+                    
+                    await tx.wait();
+                    showStatus(`✅ Successfully made partial payment of ${repaymentAmount} ETH!`, 'success');
+                    
+                    loadMarketplace();
+                    loadMyLoans();
+                }
+            } catch (error) {
+                console.error('Full error details:', error);
+                let errorMessage = error.reason || error.message || 'Unknown error';
+                
+                // Try to extract more specific error information
+                if (error.data && error.data.message) {
+                    errorMessage = error.data.message;
+                }
+                
+                showStatus(`❌ Error: ${errorMessage}`, 'error');
+            }
+        }
+
+        async function repayFullAmount(loanId, remainingAmount) {
+            try {
+                // Get current balance in real-time to account for any late fees
+                let currentBalance;
+                try {
+                    const balanceInfo = await contract.getCurrentBalance(loanId);
+                    currentBalance = balanceInfo.remainingBalance;
+                    showStatus(`Current remaining balance: ${ethers.utils.formatEther(currentBalance)} ETH`, 'info');
+                } catch (e) {
+                    // Fallback to the passed remainingAmount if getCurrentBalance fails
+                    currentBalance = remainingAmount;
+                    console.warn('Could not get current balance, using fallback:', e);
+                }
+                
+                if (confirm(`Pay full remaining balance of ${ethers.utils.formatEther(currentBalance)} ETH for Loan #${loanId}?`)) {
+                    showStatus(`Processing full repayment for loan #${loanId}...`, 'info');
+                    
+                    const tx = await contract.repayLoan(loanId, currentBalance, { 
+                        value: currentBalance,
+                        gasLimit: 350000 // Increase gas limit for overdue loans
+                    });
                     showStatus(`Transaction submitted: ${formatTxWithLink(tx.hash)}`, 'info');
                     
                     await tx.wait();
-                    showStatus(`Successfully repaid loan #${loanId}!`, 'success');
+                    showStatus(`Successfully repaid loan #${loanId} in full!`, 'success');
                     
                     loadMarketplace();
                     loadMyLoans();
@@ -850,26 +1143,45 @@
                         const loan = await contract.getLoanRequest(loanId);
                         const isOverdue = await contract.isLoanOverdue(loanId);
                         
+                        let balanceInfo = null;
                         if (loan.isFunded && !loan.isRepaid) {
-                            totalOwed = totalOwed.add(loan.repaymentAmount);
+                            try {
+                                balanceInfo = await contract.getCurrentBalance(loanId);
+                                totalOwed = totalOwed.add(balanceInfo.remainingBalance);
+                            } catch (e) {
+                                totalOwed = totalOwed.add(loan.repaymentAmount.sub(loan.amountRepaid || 0));
+                            }
                         }
                         
-                        const status = loan.isRepaid ? 'repaid' : (loan.isFunded ? 'funded' : 'pending');
-                        const statusText = loan.isRepaid ? 'Repaid' : (loan.isFunded ? 'Active' : 'Waiting for Funding');
+                        const status = loan.isRepaid ? 'repaid' : (isOverdue ? 'overdue' : (loan.isFunded ? 'funded' : 'pending'));
+                        const statusText = loan.isRepaid ? 'Repaid' : (isOverdue ? 'OVERDUE' : (loan.isFunded ? 'Active' : 'Waiting for Funding'));
+                        
+                        let repaymentInfo = '';
+                        if (loan.isFunded && !loan.isRepaid && balanceInfo) {
+                            repaymentInfo = `
+                                <div class="repayment-section" style="margin-top: 10px;">
+                                    <strong>Paid:</strong> ${ethers.utils.formatEther(balanceInfo.amountPaid)} ETH<br>
+                                    <strong>Remaining:</strong> ${ethers.utils.formatEther(balanceInfo.remainingBalance)} ETH
+                                    ${balanceInfo.hasLateFee ? '<br><span style="color: #dc3545;">20% late fee applied!</span>' : ''}
+                                </div>
+                            `;
+                        }
                         
                         return `
                             <div class="loan-card">
                                 <div class="loan-id">#${loan.id}</div>
                                 <div class="loan-status status-${status}">${statusText}</div>
-                                ${isOverdue && !loan.isRepaid ? '<div class="loan-status" style="background: #f8d7da; color: #721c24;">OVERDUE</div>' : ''}
                                 <div class="loan-details">
                                     <strong>Borrowed:</strong> ${ethers.utils.formatEther(loan.amount)} ETH<br>
-                                    <strong>Total Due:</strong> ${ethers.utils.formatEther(loan.repaymentAmount)} ETH<br>
+                                    <strong>Total Due:</strong> ${ethers.utils.formatEther(balanceInfo ? balanceInfo.totalDue : loan.repaymentAmount)} ETH<br>
                                     <strong>Interest:</strong> ${loan.interestRate / 100}%<br>
                                     <strong>Duration:</strong> ${formatDuration(loan.duration)}
+                                    ${repaymentInfo}
                                 </div>
                                 ${loan.isFunded && !loan.isRepaid ? 
-                                    `<button onclick="repayLoan(${loan.id}, '${loan.repaymentAmount}')">Repay Loan</button>` : ''}
+                                    `<button onclick="window.location.href='#marketplaceTab'; searchLoanById(); document.getElementById('searchLoanId').value='${loan.id}';">
+                                        View & Repay
+                                    </button>` : ''}
                             </div>
                         `;
                     }));
@@ -887,19 +1199,32 @@
                         
                         totalLent = totalLent.add(loan.amount);
                         
-                        const status = loan.isRepaid ? 'repaid' : 'funded';
-                        const statusText = loan.isRepaid ? 'Repaid' : 'Active';
+                        const status = loan.isRepaid ? 'repaid' : (isOverdue ? 'overdue' : 'funded');
+                        const statusText = loan.isRepaid ? 'Repaid' : (isOverdue ? 'OVERDUE' : 'Active');
+                        
+                        let repaymentInfo = '';
+                        if (!loan.isRepaid) {
+                            try {
+                                const balanceInfo = await contract.getCurrentBalance(loanId);
+                                repaymentInfo = `
+                                    <br><strong>Received:</strong> ${ethers.utils.formatEther(balanceInfo.amountPaid)} ETH<br>
+                                    <strong>Expecting:</strong> ${ethers.utils.formatEther(balanceInfo.remainingBalance)} ETH more
+                                `;
+                            } catch (e) {
+                                // Fallback for old contract
+                            }
+                        }
                         
                         return `
                             <div class="loan-card">
                                 <div class="loan-id">#${loan.id}</div>
                                 <div class="loan-status status-${status}">${statusText}</div>
-                                ${isOverdue && !loan.isRepaid ? '<div class="loan-status" style="background: #f8d7da; color: #721c24;">OVERDUE</div>' : ''}
                                 <div class="loan-details">
                                     <strong>Lent:</strong> ${ethers.utils.formatEther(loan.amount)} ETH<br>
                                     <strong>Expected Return:</strong> ${ethers.utils.formatEther(loan.repaymentAmount)} ETH<br>
                                     <strong>Interest:</strong> ${loan.interestRate / 100}%<br>
                                     <strong>Borrower:</strong> ${formatAddressWithLink(loan.borrower)}
+                                    ${repaymentInfo}
                                 </div>
                             </div>
                         `;
@@ -927,6 +1252,13 @@
                 connectWallet();
             }
         });
+
+        // Check for due soon loans every 5 minutes
+        setInterval(() => {
+            if (contract && userAddress) {
+                checkDueSoonLoans();
+            }
+        }, 300000); // 5 minutes
     </script>
 </body>
 </html>
