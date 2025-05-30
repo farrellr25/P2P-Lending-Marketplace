@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple P2P Lending - Repayment</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            margin: 20px 0;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .header {
+            background: #4CAF50;
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 15px 25px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+            width: 100%;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        input {
+            padding: 12px;
+            margin: 10px 0;
+            border: 2px solid #ddd;
+            border-radius: 5px;
+            width: 100%;
+            box-sizing: border-box;
+            font-size: 16px;
+        }
+        .loan-card {
+            background: #f9f9f9;
+            border: 2px solid #ddd;
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 8px;
+        }
+        .loan-id {
+            background: #4CAF50;
+            color: white;
+            padding: 5px 15px;
+            border-radius: 20px;
+            display: inline-block;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .status {
+            padding: 8px 15px;
+            border-radius: 15px;
+            display: inline-block;
+            font-weight: bold;
+            margin: 5px 0;
+        }
+        .status-pending { background: #fff3cd; color: #856404; }
+        .status-funded { background: #d1ecf1; color: #0c5460; }
+        .status-repaid { background: #d4edda; color: #155724; }
+        .my-loan { border: 3px solid #4CAF50; background: #f0fff0; }
+        .repay-section {
+            background: #e8f5e8;
+            padding: 15px;
+            border-radius: 8px;
+            margin-top: 15px;
+        }
+        .alert {
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+        }
+        .alert-success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .alert-error { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .alert-info { background: #d1ecf1; color: #0c5460; border: 1px solid #bee5eb; }
+        .alert-warning { background: #fff3cd; color: #856404; border: 1px solid #ffeaa7; }
+        .big-number {
+            font-size: 24px;
+            font-weight: bold;
+            color: #4CAF50;
+        }
+        .network-warning {
+            background: #ff4444;
+            color: white;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 10px 0;
+            text-align: center;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🏦 Simple P2P Lending</h1>
+        <p>Easy Loan Repayment Interface</p>
+    </div>
+    
+    <!-- Network Check -->
+    <div id="networkWarning" class="network-warning" style="display: none;">
+        ⚠️ Please switch to Sepolia Testnet to use this app!
+    </div>
+    
+    <!-- Step 1: Connect Wallet -->
+    <div class="container">
+        <h2>Step 1: Connect Your Wallet</h2>
+        <button onclick="connectWallet()" id="connectBtn">Connect MetaMask</button>
+        <div id="walletStatus"></div>
+    </div>
+
+    <!-- Step 2: Quick Actions -->
+    <div class="container" id="quickActions" style="display: none;">
+        <h2>Step 2: Quick Actions</h2>
+        <button onclick="createTestLoan()">Create Test Loan (0.01 ETH)</button>
+        <button onclick="loadMyLoans()">Load My Loans</button>
+        <div id="actionResults"></div>
+    </div>
+
+    <!-- Step 3: My Loans -->
+    <div class="container" id="myLoansSection" style="display: none;">
+        <h2>Step 3: My Loans</h2>
+        <div id="myLoans"></div>
+    </div>
+
+    <!-- Messages -->
+    <div class="container">
+        <h3>📝 Messages</h3>
+        <div id="messages"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
+    <script>
+        // Contract details - Sepolia deployment
+        const CONTRACT_ADDRESS = "0x0199577E168CaFdF27BBCa86F59CFB2B1D0A467d";
+        const SEPOLIA_CHAIN_ID = 11155111;
+        
+        // Simple ABI - only what we need
+        const CONTRACT_ABI = [
+            "function createLoanRequest(uint256 _amount, uint256 _interestRate, uint256 _duration) returns (uint256)",
+            "function fundLoan(uint256 _requestId) payable",
+            "function repayLoan(uint256 _requestId, uint256 _repaymentAmount) payable",
+            "function getLoanRequest(uint256 _requestId) view returns (tuple(uint256 id, address borrower, uint256 amount, uint256 interestRate, uint256 duration, uint256 createdAt, bool isFunded, bool isRepaid, address lender, uint256 fundedAt, uint256 repaymentAmount, uint256 amountRepaid, bool isOverdue, bool lateFeeApplied))",
+            "function getCurrentBalance(uint256 _requestId) view returns (uint256 totalDue, uint256 amountPaid, uint256 remainingBalance, bool hasLateFee)",
+            "function loanRequestCounter() view returns (uint256)",
+            "function getBorrowerLoans(address _borrower) view returns (uint256[])"
+        ];
+
+        let provider, signer, contract, userAddress;
+
+        function showMessage(text, type = 'info') {
+            const messagesDiv = document.getElementById('messages');
+            const msg = document.createElement('div');
+            msg.className = `alert alert-${type}`;
+            msg.innerHTML = `<strong>${new Date().toLocaleTimeString()}</strong> - ${text}`;
+            messagesDiv.insertBefore(msg, messagesDiv.firstChild);
+            
+            // Keep only last 5 messages
+            while (messagesDiv.children.length > 5) {
+                messagesDiv.removeChild(messagesDiv.lastChild);
+            }
+        }
+
+        async function connectWallet() {
+            try {
+                if (!window.ethereum) {
+                    showMessage('Please install MetaMask first!', 'error');
+                    return;
+                }
+
+                showMessage('Connecting to MetaMask...', 'info');
+                
+                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                provider = new ethers.providers.Web3Provider(window.ethereum);
+                signer = provider.getSigner();
+                userAddress = await signer.getAddress();
+                
+                const network = await provider.getNetwork();
+                const isCorrectNetwork = network.chainId === SEPOLIA_CHAIN_ID;
+                
+                // Show network warning if wrong network
+                document.getElementById('networkWarning').style.display = isCorrectNetwork ? 'none' : 'block';
+                
+                document.getElementById('walletStatus').innerHTML = `
+                    <div class="alert alert-${isCorrectNetwork ? 'success' : 'warning'}">
+                        <strong>${isCorrectNetwork ? '✅' : '⚠️'} Wallet Connected</strong><br>
+                        Address: <code>${userAddress.substring(0,8)}...${userAddress.substring(36)}</code><br>
+                        Network: ${network.name} (${network.chainId})
+                        ${!isCorrectNetwork ? '<br><strong>❌ Please switch to Sepolia testnet!</strong>' : ''}
+                    </div>
+                `;
+                
+                if (isCorrectNetwork) {
+                    contract = new ethers.Contract(CONTRACT_ADDRESS, CONTRACT_ABI, signer);
+                    document.getElementById('quickActions').style.display = 'block';
+                    document.getElementById('myLoansSection').style.display = 'block';
+                    showMessage('Connected successfully! You can now use the app.', 'success');
+                    loadMyLoans(); // Automatically load loans
+                } else {
+                    showMessage('Please switch to Sepolia testnet to continue.', 'warning');
+                }
+                
+            } catch (error) {
+                showMessage(`Connection error: ${error.message}`, 'error');
+                console.error(error);
+            }
+        }
+
+        async function createTestLoan() {
+            try {
+                showMessage('Creating a test loan...', 'info');
+                
+                const amount = ethers.utils.parseEther("0.01"); // 0.01 ETH
+                const interestRate = 1000; // 10%
+                const duration = 300; // 5 minutes
+                
+                const tx = await contract.createLoanRequest(amount, interestRate, duration);
+                showMessage(`Transaction sent: ${tx.hash}`, 'info');
+                
+                await tx.wait();
+                showMessage('✅ Test loan created! Refreshing your loans...', 'success');
+                
+                // Refresh loans after creating
+                setTimeout(loadMyLoans, 2000);
+                
+            } catch (error) {
+                showMessage(`Error creating loan: ${error.reason || error.message}`, 'error');
+                console.error(error);
+            }
+        }
+
+        async function loadMyLoans() {
+            try {
+                showMessage('Loading your loans...', 'info');
+                
+                const loanCount = await contract.loanRequestCounter();
+                const myLoansDiv = document.getElementById('myLoans');
+                
+                if (loanCount == 0) {
+                    myLoansDiv.innerHTML = `
+                        <div class="alert alert-info">
+                            <strong>No loans found</strong><br>
+                            Create a test loan first to see the repayment interface.
+                        </div>
+                    `;
+                    return;
+                }
+                
+                let myLoansHTML = '';
+                let foundMyLoans = false;
+                
+                // Check all loans to find user's loans
+                for (let i = 1; i <= loanCount; i++) {
+                    try {
+                        const loan = await contract.getLoanRequest(i);
+                        
+                        if (loan.borrower.toLowerCase() === userAddress.toLowerCase()) {
+                            foundMyLoans = true;
+                            
+                            const status = loan.isRepaid ? 'repaid' : (loan.isFunded ? 'funded' : 'pending');
+                            const statusText = loan.isRepaid ? 'Repaid ✅' : (loan.isFunded ? 'Needs Repayment 💰' : 'Waiting for Funding ⏳');
+                            
+                            let repaymentSection = '';
+                            
+                            // If loan needs repayment, show repayment interface
+                            if (loan.isFunded && !loan.isRepaid) {
+                                try {
+                                    const balance = await contract.getCurrentBalance(i);
+                                    repaymentSection = `
+                                        <div class="repay-section">
+                                            <h4>💳 Repay This Loan</h4>
+                                            <p><strong>Amount to Pay:</strong> <span class="big-number">${ethers.utils.formatEther(balance.remainingBalance)} ETH</span></p>
+                                            <p><strong>Amount Paid So Far:</strong> ${ethers.utils.formatEther(balance.amountPaid)} ETH</p>
+                                            <p><strong>Total Due:</strong> ${ethers.utils.formatEther(balance.totalDue)} ETH</p>
+                                            ${balance.hasLateFee ? '<p style="color: red;"><strong>⚠️ Late fee applied!</strong></p>' : ''}
+                                            
+                                            <div style="margin: 15px 0;">
+                                                <input type="number" id="payAmount_${i}" placeholder="Amount to pay (ETH)" step="0.001" max="${ethers.utils.formatEther(balance.remainingBalance)}" style="margin-bottom: 10px;">
+                                                <button onclick="repayLoan(${i}, false)" style="background: #ff9800; margin-bottom: 10px;">Make Partial Payment</button>
+                                                <button onclick="repayLoan(${i}, true)" style="background: #4CAF50;">Pay Full Amount (${ethers.utils.formatEther(balance.remainingBalance)} ETH)</button>
+                                            </div>
+                                        </div>
+                                    `;
+                                } catch (e) {
+                                    repaymentSection = `<div class="alert alert-error">Error loading balance: ${e.message}</div>`;
+                                }
+                            }
+                            
+                            myLoansHTML += `
+                                <div class="loan-card my-loan">
+                                    <div class="loan-id">Loan #${i}</div>
+                                    <div class="status status-${status}">${statusText}</div>
+                                    
+                                    <p><strong>Amount Borrowed:</strong> ${ethers.utils.formatEther(loan.amount)} ETH</p>
+                                    <p><strong>Interest Rate:</strong> ${loan.interestRate / 100}%</p>
+                                    <p><strong>Total to Repay:</strong> ${ethers.utils.formatEther(loan.repaymentAmount)} ETH</p>
+                                    <p><strong>Duration:</strong> ${Math.round(loan.duration / 60)} minutes</p>
+                                    
+                                    ${!loan.isFunded ? 
+                                        '<div class="alert alert-warning"><strong>⏳ Waiting for someone to fund this loan</strong><br>Share your loan ID with potential lenders!</div>' : 
+                                        ''
+                                    }
+                                    
+                                    ${repaymentSection}
+                                </div>
+                            `;
+                        }
+                        
+                    } catch (e) {
+                        console.error(`Error loading loan ${i}:`, e);
+                    }
+                }
+                
+                if (!foundMyLoans) {
+                    myLoansHTML = `
+                        <div class="alert alert-info">
+                            <strong>You don't have any loans yet</strong><br>
+                            Create a test loan to see how the repayment system works!
+                        </div>
+                    `;
+                }
+                
+                myLoansDiv.innerHTML = myLoansHTML;
+                showMessage(`Found ${foundMyLoans ? 'your' : 'no'} loans`, foundMyLoans ? 'success' : 'info');
+                
+            } catch (error) {
+                showMessage(`Error loading loans: ${error.message}`, 'error');
+                console.error(error);
+            }
+        }
+
+        async function repayLoan(loanId, payFull) {
+            try {
+                let amountToPay;
+                
+                if (payFull) {
+                    // Get the exact remaining balance
+                    const balance = await contract.getCurrentBalance(loanId);
+                    amountToPay = balance.remainingBalance;
+                } else {
+                    // Get amount from input
+                    const inputAmount = document.getElementById(`payAmount_${loanId}`).value;
+                    if (!inputAmount || parseFloat(inputAmount) <= 0) {
+                        showMessage('Please enter a valid payment amount', 'error');
+                        return;
+                    }
+                    amountToPay = ethers.utils.parseEther(inputAmount);
+                }
+                
+                const ethAmount = ethers.utils.formatEther(amountToPay);
+                
+                if (!confirm(`Pay ${ethAmount} ETH for Loan #${loanId}?`)) {
+                    return;
+                }
+                
+                showMessage(`Processing payment of ${ethAmount} ETH...`, 'info');
+                
+                const tx = await contract.repayLoan(loanId, amountToPay, { 
+                    value: amountToPay,
+                    gasLimit: 500000
+                });
+                
+                showMessage(`Payment transaction sent: ${tx.hash}`, 'info');
+                
+                await tx.wait();
+                
+                showMessage(`✅ Payment of ${ethAmount} ETH successful!`, 'success');
+                
+                // Refresh loans to show updated status
+                setTimeout(loadMyLoans, 2000);
+                
+            } catch (error) {
+                showMessage(`Payment error: ${error.reason || error.message}`, 'error');
+                console.error(error);
+            }
+        }
+
+        // Auto-connect if previously connected
+        window.addEventListener('load', async () => {
+            if (window.ethereum && window.ethereum.selectedAddress) {
+                connectWallet();
+            }
+        });
+
+        // Listen for network changes
+        if (window.ethereum) {
+            window.ethereum.on('chainChanged', () => {
+                window.location.reload();
+            });
+        }
+    </script>
+</body>
+</html>
