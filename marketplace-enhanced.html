@@ -1053,6 +1053,50 @@
             }
         }
 
+        async function makeRepaymentFromMyLoans(loanId, payFull) {
+            try {
+                let amountToPay;
+                
+                if (payFull) {
+                    // Get the exact remaining balance
+                    const balanceInfo = await contract.getCurrentBalance(loanId);
+                    amountToPay = balanceInfo.remainingBalance;
+                } else {
+                    // Get amount from input
+                    const inputAmount = document.getElementById(`repayAmount_myloans_${loanId}`).value;
+                    if (!inputAmount || parseFloat(inputAmount) <= 0) {
+                        showStatus('Please enter a valid payment amount', 'error');
+                        return;
+                    }
+                    amountToPay = ethers.utils.parseEther(inputAmount);
+                }
+                
+                const ethAmount = ethers.utils.formatEther(amountToPay);
+                
+                if (confirm(`Pay ${ethAmount} ETH for Loan #${loanId}?`)) {
+                    showStatus(`Processing payment of ${ethAmount} ETH...`, 'info');
+                    
+                    const tx = await contract.repayLoan(loanId, amountToPay, { 
+                        value: amountToPay,
+                        gasLimit: 300000
+                    });
+                    
+                    showStatus(`Transaction submitted: ${formatTxWithLink(tx.hash)}`, 'info');
+                    
+                    await tx.wait();
+                    showStatus(`✅ Payment of ${ethAmount} ETH successful!`, 'success');
+                    
+                    // Refresh my loans to show updated status
+                    loadMyLoans();
+                    loadMarketplace();
+                }
+                
+            } catch (error) {
+                console.error(error);
+                showStatus(`❌ Payment failed: ${error.reason || error.message}`, 'error');
+            }
+        }
+
         async function loadMyLoans() {
             try {
                 showStatus('Loading your loans...', 'info');
@@ -1085,13 +1129,20 @@
                         const status = loan.isRepaid ? 'repaid' : (isOverdue ? 'overdue' : (loan.isFunded ? 'funded' : 'pending'));
                         const statusText = loan.isRepaid ? 'Repaid' : (isOverdue ? 'OVERDUE' : (loan.isFunded ? 'Active' : 'Waiting for Funding'));
                         
-                        let repaymentInfo = '';
+                        let repaymentSection = '';
                         if (loan.isFunded && !loan.isRepaid && balanceInfo) {
-                            repaymentInfo = `
-                                <div class="repayment-section" style="margin-top: 10px;">
-                                    <strong>Paid:</strong> ${ethers.utils.formatEther(balanceInfo.amountPaid)} ETH<br>
-                                    <strong>Remaining:</strong> ${ethers.utils.formatEther(balanceInfo.remainingBalance)} ETH
-                                    ${balanceInfo.hasLateFee ? '<br><span style="color: #dc3545;">20% late fee applied!</span>' : ''}
+                            repaymentSection = `
+                                <div class="repayment-section" style="margin-top: 15px; background: #f8f9fa; padding: 15px; border-radius: 8px;">
+                                    <h4>💳 Repay This Loan</h4>
+                                    <p><strong>Amount Paid:</strong> ${ethers.utils.formatEther(balanceInfo.amountPaid)} ETH</p>
+                                    <p><strong>Remaining Balance:</strong> <span style="font-size: 18px; font-weight: bold; color: #667eea;">${ethers.utils.formatEther(balanceInfo.remainingBalance)} ETH</span></p>
+                                    ${balanceInfo.hasLateFee ? '<p style="color: #dc3545; font-weight: bold;">⚠️ 20% late fee applied!</p>' : ''}
+                                    
+                                    <div style="margin-top: 10px;">
+                                        <input type="number" id="repayAmount_myloans_${loan.id}" placeholder="Amount to pay" step="0.001" max="${ethers.utils.formatEther(balanceInfo.remainingBalance)}" style="width: 150px; padding: 8px; margin-right: 10px;">
+                                        <button onclick="makeRepaymentFromMyLoans(${loan.id}, false)" style="background: #ff9800; margin-right: 10px;">Make Payment</button>
+                                        <button onclick="makeRepaymentFromMyLoans(${loan.id}, true)" style="background: #4CAF50;">Pay Full (${ethers.utils.formatEther(balanceInfo.remainingBalance)} ETH)</button>
+                                    </div>
                                 </div>
                             `;
                         }
@@ -1105,12 +1156,8 @@
                                     <strong>Total Due:</strong> ${ethers.utils.formatEther(balanceInfo ? balanceInfo.totalDue : loan.repaymentAmount)} ETH<br>
                                     <strong>Interest:</strong> ${loan.interestRate / 100}%<br>
                                     <strong>Duration:</strong> ${formatDuration(loan.duration)}
-                                    ${repaymentInfo}
                                 </div>
-                                ${loan.isFunded && !loan.isRepaid ? 
-                                    `<button onclick="window.location.href='#marketplaceTab'; searchLoanById(); document.getElementById('searchLoanId').value='${loan.id}';">
-                                        View & Repay
-                                    </button>` : ''}
+                                ${repaymentSection}
                             </div>
                         `;
                     }));
