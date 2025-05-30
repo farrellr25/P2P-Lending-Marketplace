@@ -437,6 +437,31 @@
             "event LoanRequestCreated(uint256 indexed requestId, address indexed borrower, uint256 amount, uint256 interestRate, uint256 duration)"
         ];
 
+        // Helper function to get Etherscan URL
+        function getEtherscanUrl(type, value) {
+            const baseUrl = 'https://sepolia.etherscan.io';
+            switch(type) {
+                case 'address':
+                    return `${baseUrl}/address/${value}`;
+                case 'tx':
+                    return `${baseUrl}/tx/${value}`;
+                default:
+                    return baseUrl;
+            }
+        }
+
+        // Helper function to format address with Etherscan link
+        function formatAddressWithLink(address, showFull = false) {
+            const displayAddress = showFull ? address : `${address.substring(0, 6)}...${address.substring(38)}`;
+            return `<a href="${getEtherscanUrl('address', address)}" target="_blank" style="color: #667eea; text-decoration: none; border-bottom: 1px dotted #667eea;">${displayAddress}</a>`;
+        }
+
+        // Helper function to format transaction with Etherscan link
+        function formatTxWithLink(txHash) {
+            const displayTx = `${txHash.substring(0, 10)}...`;
+            return `<a href="${getEtherscanUrl('tx', txHash)}" target="_blank" style="color: #667eea; text-decoration: none; border-bottom: 1px dotted #667eea;">${displayTx}</a>`;
+        }
+
         let provider;
         let signer;
         let contract;
@@ -501,8 +526,9 @@
                 document.getElementById('connectionStatus').innerHTML = `
                     <div style="background: #d4edda; padding: 15px; border-radius: 5px; margin-top: 10px;">
                         <strong>✅ Connected!</strong><br>
-                        Address: ${userAddress}<br>
-                        Network: ${network.name} (Chain ID: ${network.chainId})
+                        Address: ${formatAddressWithLink(userAddress, true)}<br>
+                        Network: ${network.name} (Chain ID: ${network.chainId})<br>
+                        Contract: ${formatAddressWithLink(CONTRACT_ADDRESS, true)}
                     </div>
                 `;
                 
@@ -642,7 +668,7 @@
                             <strong>Interest:</strong> ${loan.interestRate / 100}%<br>
                             <strong>Duration:</strong> ${formatDuration(loan.duration)}<br>
                             <strong>Total Repay:</strong> ${ethers.utils.formatEther(loan.repaymentAmount)} ETH<br>
-                            <strong>Borrower:</strong> ${loan.borrower.substring(0, 6)}...${loan.borrower.substring(38)}
+                            <strong>Borrower:</strong> ${formatAddressWithLink(loan.borrower)}
                             ${loan.borrower.toLowerCase() === userAddress.toLowerCase() ? ' (You)' : ''}
                         </div>
                         
@@ -748,7 +774,7 @@
                 const durationSeconds = convertDurationToSeconds(parseInt(duration), durationUnit);
                 
                 const tx = await contract.createLoanRequest(amountWei, interestRateBps, durationSeconds);
-                showStatus(`Transaction submitted: ${tx.hash.substring(0, 10)}...`, 'info');
+                showStatus(`Transaction submitted: ${formatTxWithLink(tx.hash)}`, 'info');
                 
                 await tx.wait();
                 showStatus('Loan request created successfully!', 'success');
@@ -772,7 +798,7 @@
                     showStatus(`Funding loan #${loanId}...`, 'info');
                     
                     const tx = await contract.fundLoan(loanId, { value: amount });
-                    showStatus(`Transaction submitted: ${tx.hash.substring(0, 10)}...`, 'info');
+                    showStatus(`Transaction submitted: ${formatTxWithLink(tx.hash)}`, 'info');
                     
                     await tx.wait();
                     showStatus(`Successfully funded loan #${loanId}!`, 'success');
@@ -791,7 +817,7 @@
                     showStatus(`Repaying loan #${loanId}...`, 'info');
                     
                     const tx = await contract.repayLoan(loanId, { value: repaymentAmount });
-                    showStatus(`Transaction submitted: ${tx.hash.substring(0, 10)}...`, 'info');
+                    showStatus(`Transaction submitted: ${formatTxWithLink(tx.hash)}`, 'info');
                     
                     await tx.wait();
                     showStatus(`Successfully repaid loan #${loanId}!`, 'success');
@@ -873,7 +899,7 @@
                                     <strong>Lent:</strong> ${ethers.utils.formatEther(loan.amount)} ETH<br>
                                     <strong>Expected Return:</strong> ${ethers.utils.formatEther(loan.repaymentAmount)} ETH<br>
                                     <strong>Interest:</strong> ${loan.interestRate / 100}%<br>
-                                    <strong>Borrower:</strong> ${loan.borrower.substring(0, 6)}...${loan.borrower.substring(38)}
+                                    <strong>Borrower:</strong> ${formatAddressWithLink(loan.borrower)}
                                 </div>
                             </div>
                         `;
