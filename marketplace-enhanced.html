@@ -514,6 +514,64 @@
             return `<a href="${getEtherscanUrl('tx', txHash)}" target="_blank" style="color: #667eea; text-decoration: none; border-bottom: 1px dotted #667eea;">${displayTx}</a>`;
         }
 
+        
+        // Helper function to format timestamp
+        function formatTimestamp(timestamp) {
+            const date = new Date(timestamp * 1000);
+            return date.toLocaleString('en-US', { 
+                month: 'short', 
+                day: 'numeric', 
+                year: 'numeric',
+                hour: '2-digit', 
+                minute: '2-digit'
+            });
+        }
+
+        // Helper function to calculate and format due date
+        function getDueDate(fundedAt, duration) {
+            const dueTimestamp = fundedAt + duration;
+            const dueDate = new Date(dueTimestamp * 1000);
+            return {
+                timestamp: dueTimestamp,
+                formatted: formatTimestamp(dueTimestamp),
+                date: dueDate
+            };
+        }
+
+        // Helper function to get time remaining
+        function getTimeRemaining(dueTimestamp) {
+            const now = Math.floor(Date.now() / 1000);
+            const remaining = dueTimestamp - now;
+            
+            if (remaining <= 0) return 'OVERDUE';
+            
+            if (remaining < 3600) return `${Math.floor(remaining / 60)} minutes`;
+            if (remaining < 86400) return `${Math.floor(remaining / 3600)} hours`;
+            return `${Math.floor(remaining / 86400)} days`;
+        }
+
+        // Helper function to check if due within 24 hours
+        function isDueWithin24Hours(dueTimestamp) {
+            const now = Math.floor(Date.now() / 1000);
+            const remaining = dueTimestamp - now;
+            return remaining > 0 && remaining <= 86400; // 24 hours in seconds
+        }
+
+        // Check for loans due soon and show alerts
+        function checkDueSoonLoans() {
+            const dueSoonLoans = allLoans.filter(loan => {
+                if (!loan.isFunded || loan.isRepaid) return false;
+                const dueDate = getDueDate(loan.fundedAt, loan.duration);
+                return isDueWithin24Hours(dueDate.timestamp) && loan.borrower.toLowerCase() === userAddress.toLowerCase();
+            });
+
+            dueSoonLoans.forEach(loan => {
+                const dueDate = getDueDate(loan.fundedAt, loan.duration);
+                const timeRemaining = getTimeRemaining(dueDate.timestamp);
+                showStatus(`⚠️ ALERT: Loan #${loan.id} is due within 24 hours! (${timeRemaining} remaining)`, 'error');
+            });
+        }
+
         let provider;
         let signer;
         let contract;
@@ -653,6 +711,7 @@
                 
                 applyFilters();
                 showStatus('Marketplace loaded', 'success');
+                checkDueSoonLoans();
                 
             } catch (error) {
                 console.error(error);
@@ -749,6 +808,7 @@
                                 <input type="number" id="repayAmount_${loan.id}" placeholder="Amount to repay" step="0.001" min="0.001" max="${ethers.utils.formatEther(remaining)}">
                                 <button onclick="makePartialRepayment(${loan.id}, '${remaining}')">Make Payment</button>
                                 <button onclick="repayFullAmount(${loan.id}, '${remaining}')" style="background-color: #28a745;">Pay Full Amount</button>
+                                ${loan.isOverdue ? '<button onclick="loadMarketplace()" style="background-color: #ffc107; color: #000;">🔄 Refresh Balance</button>' : ''}
                             </div>
                         </div>
                     `;
@@ -765,9 +825,25 @@
                             <strong>Interest:</strong> ${loan.interestRate / 100}%<br>
                             <strong>Duration:</strong> ${formatDuration(loan.duration)}<br>
                             <strong>Original Total:</strong> ${ethers.utils.formatEther(loan.repaymentAmount)} ETH<br>
+                            <strong>Created:</strong> ${formatTimestamp(loan.createdAt)}<br>
+                            ${loan.isFunded ? `<strong>Funded:</strong> ${formatTimestamp(loan.fundedAt)}<br>` : ''}
+                            ${loan.isFunded && !loan.isRepaid ? `
+                                <strong>Due Date:</strong> <span style="color: ${isDueWithin24Hours(getDueDate(loan.fundedAt, loan.duration).timestamp) ? '#dc3545' : 'inherit'}; font-weight: ${isDueWithin24Hours(getDueDate(loan.fundedAt, loan.duration).timestamp) ? 'bold' : 'normal'}">
+                                    ${getDueDate(loan.fundedAt, loan.duration).formatted}
+                                </span><br>
+                                <strong>Time Remaining:</strong> <span style="color: ${isDueWithin24Hours(getDueDate(loan.fundedAt, loan.duration).timestamp) ? '#dc3545' : 'inherit'}; font-weight: ${isDueWithin24Hours(getDueDate(loan.fundedAt, loan.duration).timestamp) ? 'bold' : 'normal'}">
+                                    ${getTimeRemaining(getDueDate(loan.fundedAt, loan.duration).timestamp)}
+                                </span><br>
+                            ` : ''}
                             <strong>Borrower:</strong> ${formatAddressWithLink(loan.borrower)}
                             ${isOwnLoan ? ' (You)' : ''}
                         </div>
+                        
+                        ${isOwnLoan && loan.isFunded && !loan.isRepaid && isDueWithin24Hours(getDueDate(loan.fundedAt, loan.duration).timestamp) ? `
+                            <div style="background: #f8d7da; color: #721c24; padding: 10px; border-radius: 5px; margin: 10px 0; font-weight: bold; text-align: center;">
+                                ⏰ DUE WITHIN 24 HOURS! Please repay soon to avoid late fees.
+                            </div>
+                        ` : ''}
                         
                         ${canFund ? `
                             <button onclick="fundLoan(${loan.id}, '${loan.amount}')" style="width: 100%; margin-top: 15px; background-color: #28a745; font-size: 16px;">
@@ -927,16 +1003,31 @@
             }
             
             try {
+                // Get current balance in real-time to account for any late fees
+                let currentBalance;
+                try {
+                    const balanceInfo = await contract.getCurrentBalance(loanId);
+                    currentBalance = balanceInfo.remainingBalance;
+                    showStatus(`Current remaining balance: ${ethers.utils.formatEther(currentBalance)} ETH`, 'info');
+                } catch (e) {
+                    // Fallback to the passed maxAmount if getCurrentBalance fails
+                    currentBalance = maxAmount;
+                    console.warn('Could not get current balance, using fallback:', e);
+                }
+                
                 const amountWei = ethers.utils.parseEther(repaymentAmount);
-                if (amountWei.gt(maxAmount)) {
-                    showStatus('Repayment amount exceeds remaining balance', 'error');
+                if (amountWei.gt(currentBalance)) {
+                    showStatus(`Repayment amount exceeds current remaining balance of ${ethers.utils.formatEther(currentBalance)} ETH`, 'error');
                     return;
                 }
                 
-                if (confirm(`Make partial payment of ${repaymentAmount} ETH for Loan #${loanId}?`)) {
+                if (confirm(`Make partial payment of ${repaymentAmount} ETH for Loan #${loanId}?\nCurrent remaining balance: ${ethers.utils.formatEther(currentBalance)} ETH`)) {
                     showStatus(`Processing partial repayment for loan #${loanId}...`, 'info');
                     
-                    const tx = await contract.repayLoan(loanId, amountWei, { value: amountWei });
+                    const tx = await contract.repayLoan(loanId, amountWei, { 
+                        value: amountWei,
+                        gasLimit: 350000 // Increase gas limit for overdue loans
+                    });
                     showStatus(`Transaction submitted: ${formatTxWithLink(tx.hash)}`, 'info');
                     
                     await tx.wait();
@@ -953,10 +1044,25 @@
 
         async function repayFullAmount(loanId, remainingAmount) {
             try {
-                if (confirm(`Pay full remaining balance of ${ethers.utils.formatEther(remainingAmount)} ETH for Loan #${loanId}?`)) {
+                // Get current balance in real-time to account for any late fees
+                let currentBalance;
+                try {
+                    const balanceInfo = await contract.getCurrentBalance(loanId);
+                    currentBalance = balanceInfo.remainingBalance;
+                    showStatus(`Current remaining balance: ${ethers.utils.formatEther(currentBalance)} ETH`, 'info');
+                } catch (e) {
+                    // Fallback to the passed remainingAmount if getCurrentBalance fails
+                    currentBalance = remainingAmount;
+                    console.warn('Could not get current balance, using fallback:', e);
+                }
+                
+                if (confirm(`Pay full remaining balance of ${ethers.utils.formatEther(currentBalance)} ETH for Loan #${loanId}?`)) {
                     showStatus(`Processing full repayment for loan #${loanId}...`, 'info');
                     
-                    const tx = await contract.repayLoan(loanId, remainingAmount, { value: remainingAmount });
+                    const tx = await contract.repayLoan(loanId, currentBalance, { 
+                        value: currentBalance,
+                        gasLimit: 350000 // Increase gas limit for overdue loans
+                    });
                     showStatus(`Transaction submitted: ${formatTxWithLink(tx.hash)}`, 'info');
                     
                     await tx.wait();
@@ -1099,6 +1205,13 @@
                 connectWallet();
             }
         });
+
+        // Check for due soon loans every 5 minutes
+        setInterval(() => {
+            if (contract && userAddress) {
+                checkDueSoonLoans();
+            }
+        }, 300000); // 5 minutes
     </script>
 </body>
 </html>
